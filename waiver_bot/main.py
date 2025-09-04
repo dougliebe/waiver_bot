@@ -17,7 +17,7 @@ def _alerts_to_embeds(alerts, *, max_per_message: int):
     for a in alerts:
         title = f"{a.player_name} {f'({a.team_pos})' if a.team_pos else ''}"
         desc = (
-            f"Kind: {a.kind}\n"
+            f"Kind: {a.kind} {'🟢➕' if a.kind.lower() == 'add' else '🔴❌' if a.kind.lower() == 'drop' else ''}\n"
             f"Add Δ: {a.add_delta} (rate {a.add_rate_per_min:.2f}/min)\n"
             f"Drop Δ: {a.drop_delta} (rate {a.drop_rate_per_min:.2f}/min)"
         )
