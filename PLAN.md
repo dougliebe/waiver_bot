@@ -47,6 +47,9 @@ MIN_ABS_ADD_DELTA=15
 MIN_ABS_DROP_DELTA=15
 SMOOTHING_N=3                # number of recent snapshots to average
 MAX_ALERTS_PER_PLAYER=3      # per day
+MAX_ALERTS_PER_ITERATION=10  # cap per run/iteration to avoid floods
+EMBED_ALERTS_PER_MESSAGE=10  # number of alerts batched per Discord message
+MAX_DISCORD_RETRIES=3        # 429/backoff retries
 ```
 
 ---
@@ -144,6 +147,10 @@ python-dotenv
 * In‑memory state keeps a bounded deque per player, enforcing `SMOOTHING_N`.
 * Per‑day alert rate limits via in‑memory counters (`MAX_ALERTS_PER_PLAYER`).
 * Discord notifier supports **DRY_RUN** (console output) when webhook is not set.
+* Flood control:
+  * Alerts are batched as embeds (up to `EMBED_ALERTS_PER_MESSAGE` per message).
+  * Per‑iteration cap with `MAX_ALERTS_PER_ITERATION`.
+  * 429 handling with exponential backoff up to `MAX_DISCORD_RETRIES`.
 
 ---
 

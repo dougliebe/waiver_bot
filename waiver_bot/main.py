@@ -12,15 +12,24 @@ from .scraper import fetch_and_parse_buzz_index
 from .state import InMemoryState
 
 
-async def send_alerts(notifier: DiscordNotifier, alerts) -> None:
+def _alerts_to_embeds(alerts, *, max_per_message: int):
+    embeds = []
     for a in alerts:
         title = f"{a.player_name} {f'({a.team_pos})' if a.team_pos else ''}"
-        lines = [
-            f"Kind: {a.kind}",
-            f"Add Δ: {a.add_delta} (rate {a.add_rate_per_min:.2f}/min)",
-            f"Drop Δ: {a.drop_delta} (rate {a.drop_rate_per_min:.2f}/min)",
-        ]
-        await notifier.send("\n".join(lines), title=title)
+        desc = (
+            f"Kind: {a.kind}\n"
+            f"Add Δ: {a.add_delta} (rate {a.add_rate_per_min:.2f}/min)\n"
+            f"Drop Δ: {a.drop_delta} (rate {a.drop_rate_per_min:.2f}/min)"
+        )
+        embeds.append({"title": title, "description": desc, "color": 0x2ecc71})
+    # chunk embeds to meet per-message limit
+    for i in range(0, len(embeds), max_per_message):
+        yield embeds[i : i + max_per_message]
+
+
+async def send_alerts(notifier: DiscordNotifier, alerts, *, max_per_message: int) -> None:
+    for embeds_chunk in _alerts_to_embeds(alerts, max_per_message=max_per_message):
+        await notifier.send_embeds(embeds_chunk)
 
 
 async def run_once(cfg: Config, state: InMemoryState, date_override: Optional[str]) -> None:
@@ -40,8 +49,11 @@ async def run_once(cfg: Config, state: InMemoryState, date_override: Optional[st
         min_abs_drop_delta=cfg.min_abs_drop_delta,
         max_alerts_per_player=cfg.max_alerts_per_player,
     )
-    notifier = DiscordNotifier(cfg.discord_webhook_url, cfg.dry_run)
-    await send_alerts(notifier, alerts)
+    if alerts:
+        # cap per-iteration
+        alerts = alerts[: max(1, cfg.max_alerts_per_iteration)]
+    notifier = DiscordNotifier(cfg.discord_webhook_url, cfg.dry_run, max_retries=cfg.max_discord_retries)
+    await send_alerts(notifier, alerts, max_per_message=max(1, cfg.embed_alerts_per_message))
     if not alerts:
         if is_baseline:
             logging.info("Baseline established. Run again (or use continuous mode) to detect changes.")
@@ -51,7 +63,7 @@ async def run_once(cfg: Config, state: InMemoryState, date_override: Optional[st
 
 async def run_loop(cfg: Config, date_override: Optional[str]) -> None:
     state = InMemoryState(cfg.smoothing_n)
-    notifier = DiscordNotifier(cfg.discord_webhook_url, cfg.dry_run)
+    notifier = DiscordNotifier(cfg.discord_webhook_url, cfg.dry_run, max_retries=cfg.max_discord_retries)
 
     stop_event = asyncio.Event()
 
@@ -82,7 +94,9 @@ async def run_loop(cfg: Config, date_override: Optional[str]) -> None:
             min_abs_drop_delta=cfg.min_abs_drop_delta,
             max_alerts_per_player=cfg.max_alerts_per_player,
         )
-        await send_alerts(notifier, alerts)
+        if alerts:
+            alerts = alerts[: max(1, cfg.max_alerts_per_iteration)]
+        await send_alerts(notifier, alerts, max_per_message=max(1, cfg.embed_alerts_per_message))
         if not alerts and len(state.player_name_to_history) <= 1:
             logging.info("Baseline established on first loop iteration. Subsequent iterations will detect changes.")
         elif not alerts:
@@ -101,7 +115,7 @@ async def run_iterations(
     interval_seconds: Optional[int],
 ) -> None:
     state = InMemoryState(cfg.smoothing_n)
-    notifier = DiscordNotifier(cfg.discord_webhook_url, cfg.dry_run)
+    notifier = DiscordNotifier(cfg.discord_webhook_url, cfg.dry_run, max_retries=cfg.max_discord_retries)
     sleep_seconds = interval_seconds if interval_seconds is not None else cfg.check_interval_min * 60
 
     for i in range(iterations):
@@ -120,7 +134,9 @@ async def run_iterations(
             min_abs_drop_delta=cfg.min_abs_drop_delta,
             max_alerts_per_player=cfg.max_alerts_per_player,
         )
-        await send_alerts(notifier, alerts)
+        if alerts:
+            alerts = alerts[: max(1, cfg.max_alerts_per_iteration)]
+        await send_alerts(notifier, alerts, max_per_message=max(1, cfg.embed_alerts_per_message))
         if not alerts and i == 0:
             logging.info("Baseline established. Subsequent iterations will detect changes.")
         elif not alerts:

@@ -50,6 +50,9 @@ class Config:
     min_abs_drop_delta: int
     smoothing_n: int
     max_alerts_per_player: int
+    max_alerts_per_iteration: int
+    embed_alerts_per_message: int
+    max_discord_retries: int
     dry_run: bool
     user_agent: str
     request_timeout_seconds: int
@@ -67,6 +70,9 @@ class Config:
             min_abs_drop_delta=_get_env_int("MIN_ABS_DROP_DELTA", 15),
             smoothing_n=max(1, _get_env_int("SMOOTHING_N", 3)),
             max_alerts_per_player=_get_env_int("MAX_ALERTS_PER_PLAYER", 3),
+            max_alerts_per_iteration=_get_env_int("MAX_ALERTS_PER_ITERATION", 10),
+            embed_alerts_per_message=_get_env_int("EMBED_ALERTS_PER_MESSAGE", 10),
+            max_discord_retries=_get_env_int("MAX_DISCORD_RETRIES", 3),
             dry_run=_get_env_bool("DRY_RUN", True),
             user_agent=_get_env_text("USER_AGENT", "Mozilla/5.0"),
             request_timeout_seconds=_get_env_int("REQUEST_TIMEOUT_SECONDS", 30),
