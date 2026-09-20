@@ -23,6 +23,45 @@ def minutes_between(now: datetime, then: datetime) -> float:
     return max((now - then).total_seconds() / 60.0, 1e-6)
 
 
+@dataclass
+class RateSnapshot:
+    player_name: str
+    team_pos: Optional[str]
+    add_delta: int
+    drop_delta: int
+    add_rate_per_min: float
+    drop_rate_per_min: float
+
+
+def compute_rates(state: InMemoryState, rows: Iterable[PlayerRow]) -> List[RateSnapshot]:
+    """Compute add/drop rates for all rows vs. their previous snapshot.
+
+    Must be called BEFORE evaluate_rows() for a given fetch, since evaluate_rows
+    records a new snapshot that would otherwise make this a no-op.
+    """
+    now = utcnow()
+    results: List[RateSnapshot] = []
+    for r in rows:
+        history = state.player_name_to_history.get(r.name)
+        prev = history.get_previous() if history else None
+        if prev is None:
+            continue
+        dt_min = minutes_between(now, prev.ts)
+        add_delta = r.adds - prev.adds
+        drop_delta = r.drops - prev.drops
+        results.append(
+            RateSnapshot(
+                player_name=r.name,
+                team_pos=r.team_pos,
+                add_delta=add_delta,
+                drop_delta=drop_delta,
+                add_rate_per_min=float(add_delta) / dt_min,
+                drop_rate_per_min=float(drop_delta) / dt_min,
+            )
+        )
+    return results
+
+
 def evaluate_rows(
     state: InMemoryState,
     rows: Iterable[PlayerRow],

@@ -6,10 +6,32 @@ import logging
 from typing import Optional
 
 from .config import Config
-from .logic import evaluate_rows
+from .logic import compute_rates, evaluate_rows
 from .notifier import DiscordNotifier
 from .scraper import fetch_and_parse_buzz_index
 from .state import InMemoryState
+
+
+def _log_top_rates(state: InMemoryState, rows, *, top_n: int = 3) -> None:
+    """Print the top-N players by add rate (and top-N by drop rate) so the
+    operator can eyeball that rates look sane while the loop is running."""
+    rates = compute_rates(state, rows)
+    if not rates:
+        logging.info("No prior snapshot yet; skipping top-rate preview (baseline run).")
+        return
+
+    top_adds = sorted(rates, key=lambda r: r.add_rate_per_min, reverse=True)[:top_n]
+    top_drops = sorted(rates, key=lambda r: r.drop_rate_per_min, reverse=True)[:top_n]
+
+    logging.info(f"Top {len(top_adds)} adds/min:")
+    for r in top_adds:
+        pos = f" ({r.team_pos})" if r.team_pos else ""
+        logging.info(f"  {r.player_name}{pos}: +{r.add_delta} ({r.add_rate_per_min:.2f}/min)")
+
+    logging.info(f"Top {len(top_drops)} drops/min:")
+    for r in top_drops:
+        pos = f" ({r.team_pos})" if r.team_pos else ""
+        logging.info(f"  {r.player_name}{pos}: +{r.drop_delta} ({r.drop_rate_per_min:.2f}/min)")
 
 
 def _alerts_to_embeds(alerts, *, max_per_message: int):
@@ -33,13 +55,23 @@ async def send_alerts(notifier: DiscordNotifier, alerts, *, max_per_message: int
 
 
 async def run_once(cfg: Config, state: InMemoryState, date_override: Optional[str]) -> None:
-    rows = await fetch_and_parse_buzz_index(
-        date_yyyy_mm_dd=date_override,
-        user_agent=cfg.user_agent,
-        timeout_seconds=cfg.request_timeout_seconds,
-    )
+    try:
+        rows = await fetch_and_parse_buzz_index(
+            date_yyyy_mm_dd=date_override,
+            user_agent=cfg.user_agent,
+            timeout_seconds=cfg.request_timeout_seconds,
+            retry_max=cfg.request_retry_max,
+            backoff_start=cfg.request_retry_backoff_start,
+            backoff_max=cfg.request_retry_backoff_max,
+            jitter=cfg.request_retry_jitter,
+            http2_enabled=cfg.http2_enabled,
+        )
+    except Exception as e:
+        logging.warning(f"Fetch failed: {e}.")
+        return
     logging.info(f"Fetched {len(rows)} rows from Yahoo (date={date_override or 'latest'})")
     is_baseline = len(state.player_name_to_history) == 0
+    _log_top_rates(state, rows)
     alerts = evaluate_rows(
         state=state,
         rows=rows,
@@ -79,12 +111,26 @@ async def run_loop(cfg: Config, date_override: Optional[str]) -> None:
             pass
 
     while not stop_event.is_set():
-        rows = await fetch_and_parse_buzz_index(
-            date_yyyy_mm_dd=date_override,
-            user_agent=cfg.user_agent,
-            timeout_seconds=cfg.request_timeout_seconds,
-        )
+        try:
+            rows = await fetch_and_parse_buzz_index(
+                date_yyyy_mm_dd=date_override,
+                user_agent=cfg.user_agent,
+                timeout_seconds=cfg.request_timeout_seconds,
+                retry_max=cfg.request_retry_max,
+                backoff_start=cfg.request_retry_backoff_start,
+                backoff_max=cfg.request_retry_backoff_max,
+                jitter=cfg.request_retry_jitter,
+                http2_enabled=cfg.http2_enabled,
+            )
+        except Exception as e:
+            logging.warning(f"Fetch failed: {e}. Will retry next interval.")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=cfg.check_interval_min * 60)
+            except asyncio.TimeoutError:
+                pass
+            continue
         logging.info(f"Fetched {len(rows)} rows from Yahoo (date={date_override or 'latest'})")
+        _log_top_rates(state, rows)
         alerts = evaluate_rows(
             state=state,
             rows=rows,
@@ -119,12 +165,24 @@ async def run_iterations(
     sleep_seconds = interval_seconds if interval_seconds is not None else cfg.check_interval_min * 60
 
     for i in range(iterations):
-        rows = await fetch_and_parse_buzz_index(
-            date_yyyy_mm_dd=date_override,
-            user_agent=cfg.user_agent,
-            timeout_seconds=cfg.request_timeout_seconds,
-        )
+        try:
+            rows = await fetch_and_parse_buzz_index(
+                date_yyyy_mm_dd=date_override,
+                user_agent=cfg.user_agent,
+                timeout_seconds=cfg.request_timeout_seconds,
+                retry_max=cfg.request_retry_max,
+                backoff_start=cfg.request_retry_backoff_start,
+                backoff_max=cfg.request_retry_backoff_max,
+                jitter=cfg.request_retry_jitter,
+                http2_enabled=cfg.http2_enabled,
+            )
+        except Exception as e:
+            logging.warning(f"[iter {i+1}/{iterations}] Fetch failed: {e}. Continuing after interval.")
+            if i < iterations - 1:
+                await asyncio.sleep(max(0, sleep_seconds))
+            continue
         logging.info(f"[iter {i+1}/{iterations}] Fetched {len(rows)} rows from Yahoo (date={date_override or 'latest'})")
+        _log_top_rates(state, rows)
         alerts = evaluate_rows(
             state=state,
             rows=rows,

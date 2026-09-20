@@ -50,6 +50,11 @@ MAX_ALERTS_PER_PLAYER=3      # per day
 MAX_ALERTS_PER_ITERATION=10  # cap per run/iteration to avoid floods
 EMBED_ALERTS_PER_MESSAGE=10  # number of alerts batched per Discord message
 MAX_DISCORD_RETRIES=3        # 429/backoff retries
+REQUEST_RETRY_MAX=4          # Yahoo fetch retries
+REQUEST_RETRY_BACKOFF_START=1.0
+REQUEST_RETRY_BACKOFF_MAX=8.0
+REQUEST_RETRY_JITTER=0.25
+HTTP2_ENABLED=false
 ```
 
 ---

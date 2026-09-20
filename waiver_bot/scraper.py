@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import random
 import httpx
 from bs4 import BeautifulSoup
 
@@ -19,7 +20,7 @@ def build_buzz_index_url(date_yyyy_mm_dd: Optional[str]) -> str:
     Example with date: ...?sort=BI_A&src=combined&bimtab=A&trendtab=O&pos=ALL&date=2025-09-03
     """
     params = (
-        "sort=BI_A",
+        "sort=BI_S",
         "src=combined",
         "bimtab=A",
         "trendtab=O",
@@ -40,17 +41,42 @@ class PlayerRow:
     url: Optional[str]
 
 
-async def fetch_buzz_index_html(url: str, user_agent: str, timeout_seconds: int) -> str:
+async def fetch_buzz_index_html(
+    url: str,
+    user_agent: str,
+    timeout_seconds: int,
+    *,
+    retry_max: int = 4,
+    backoff_start: float = 1.0,
+    backoff_max: float = 8.0,
+    jitter: float = 0.25,
+    http2_enabled: bool = False,
+) -> str:
     headers = {
         "User-Agent": user_agent,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
         "Connection": "keep-alive",
     }
-    async with httpx.AsyncClient(timeout=timeout_seconds, headers=headers, follow_redirects=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
+    attempt = 0
+    backoff = backoff_start
+    async with httpx.AsyncClient(timeout=timeout_seconds, headers=headers, follow_redirects=True, http2=http2_enabled) as client:
+        while True:
+            attempt += 1
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.text
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.HTTPStatusError):
+                if attempt > retry_max:
+                    raise
+                delay = min(backoff, backoff_max)
+                # add small jitter to avoid thundering herd
+                delay = delay + (random.random() - 0.5) * 2 * jitter
+                if delay < 0:
+                    delay = 0
+                await asyncio.sleep(delay)
+                backoff = min(backoff * 2, backoff_max)
 
 
 def _safe_int(text: str) -> int:
@@ -166,9 +192,24 @@ async def fetch_and_parse_buzz_index(
     date_yyyy_mm_dd: Optional[str],
     user_agent: str,
     timeout_seconds: int,
+    *,
+    retry_max: int = 4,
+    backoff_start: float = 1.0,
+    backoff_max: float = 8.0,
+    jitter: float = 0.25,
+    http2_enabled: bool = False,
 ) -> List[PlayerRow]:
     url = build_buzz_index_url(date_yyyy_mm_dd)
-    html = await fetch_buzz_index_html(url=url, user_agent=user_agent, timeout_seconds=timeout_seconds)
+    html = await fetch_buzz_index_html(
+        url=url,
+        user_agent=user_agent,
+        timeout_seconds=timeout_seconds,
+        retry_max=retry_max,
+        backoff_start=backoff_start,
+        backoff_max=backoff_max,
+        jitter=jitter,
+        http2_enabled=http2_enabled,
+    )
     return parse_buzz_index(html)
 
 

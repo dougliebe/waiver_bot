@@ -53,9 +53,15 @@ class Config:
     max_alerts_per_iteration: int
     embed_alerts_per_message: int
     max_discord_retries: int
+    # Yahoo/network
     dry_run: bool
     user_agent: str
     request_timeout_seconds: int
+    request_retry_max: int
+    request_retry_backoff_start: float
+    request_retry_backoff_max: float
+    request_retry_jitter: float
+    http2_enabled: bool
 
     @staticmethod
     def from_env() -> "Config":
@@ -76,6 +82,11 @@ class Config:
             dry_run=_get_env_bool("DRY_RUN", True),
             user_agent=_get_env_text("USER_AGENT", "Mozilla/5.0"),
             request_timeout_seconds=_get_env_int("REQUEST_TIMEOUT_SECONDS", 30),
+            request_retry_max=_get_env_int("REQUEST_RETRY_MAX", 4),
+            request_retry_backoff_start=_get_env_float("REQUEST_RETRY_BACKOFF_START", 1.0),
+            request_retry_backoff_max=_get_env_float("REQUEST_RETRY_BACKOFF_MAX", 8.0),
+            request_retry_jitter=_get_env_float("REQUEST_RETRY_JITTER", 0.25),
+            http2_enabled=_get_env_bool("HTTP2_ENABLED", False),
         )
 
 
